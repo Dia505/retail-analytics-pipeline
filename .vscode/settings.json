@@ -1,0 +1,16 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "retail_db_local",
+            "database": "retail_inventory_db",
+            "username": "postgres",
+            "password": "2001",
+            "connectionTimeout": 30
+        }
+    ]
+}
