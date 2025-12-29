@@ -16,7 +16,7 @@
 --     seasonality TEXT
 -- );
 
-SELECT * FROM raw_retail_inventory
+SELECT * FROM raw_retail_inventory;
 
 -- To check the columns and their data type --
 SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'raw_retail_inventory';
@@ -39,5 +39,46 @@ SELECT
     COUNT(*) FILTER (WHERE category IS NULL) as null_category,
     COUNT(*) FILTER (WHERE weather_condition IS NULL) as null_weather_condition,
     COUNT(*) FILTER (WHERE seasonality IS NULL) as null_seasonality
-    FROM raw_retail_inventory
+    FROM raw_retail_inventory;
 
+-- TO check for duplicate rows --
+-- No duplicate rows --
+SELECT COUNT(*) - COUNT(*) FROM (
+    SELECT DISTINCT sales_date, units_ordered, demand_forecast, price, discount, holiday_promotion, competitor_pricing, inventory, units_sold, store_id, product_id, region, category, weather_condition, seasonality FROM raw_retail_inventory
+) t;
+
+SELECT * FROM (
+    SELECT *, COUNT(*) OVER(
+        PARTITION BY sales_date, units_ordered, demand_forecast, price, discount, holiday_promotion, competitor_pricing, inventory, units_sold, store_id, product_id, region, category, weather_condition, seasonality
+    ) AS dup_count
+    FROM raw_retail_inventory
+) t
+WHERE dup_count > 1;
+
+-- Check for invalid values --
+-- Negative prices --
+SELECT COUNT(*) FROM raw_retail_inventory WHERE price <= 0 OR competitor_pricing <= 0;
+-- Negative inventory --
+SELECT COUNT(*) FROM raw_retail_inventory WHERE inventory < 0;
+-- Negative amounts of units sold or ordered -- 
+SELECT COUNT(*) FROM raw_retail_inventory WHERE units_sold < 0 or units_ordered < 0
+-- Negative discounts or discounts above 100% --
+SELECT COUNT(*) FROM raw_retail_inventory WHERE discount > 100 OR discount < 0
+
+-- There seem to be products with negative demands --
+SELECT * FROM raw_retail_inventory WHERE demand_forecast < 0
+
+CREATE OR REPLACE VIEW cleaned_retail_inventory AS 
+SELECT *, CASE
+    WHEN demand_forecast < 0 THEN 1 ELSE 0
+    END AS is_negative_forecast
+FROM raw_retail_inventory
+WHERE
+    price > 0 AND
+    competitor_pricing > 0 AND
+    inventory > 0 AND 
+    units_ordered > 0 AND
+    units_sold > 0 AND
+    discount BETWEEN 0 AND 100;
+
+SELECT * FROM cleaned_retail_inventory;
