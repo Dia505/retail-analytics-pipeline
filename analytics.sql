@@ -72,3 +72,77 @@ yearly_ranked AS(
 SELECT sales_year, product_id, category, total_yearly_sales FROM yearly_ranked
 WHERE rank_per_year = 1
 ORDER BY sales_year
+
+-- Products declining month over month -- 
+WITH monthly_sales AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, product_id, category, SUM(units_sold) AS total_units_sold
+    FROM cleaned_retail_inventory 
+    GROUP BY 1,2,3
+),
+declining_monthly_ranked AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY sales_month
+        ORDER BY total_units_sold DESC
+    ) AS rank_per_month
+    FROM monthly_sales
+)
+SELECT sales_month, product_id, category, total_units_sold FROM declining_monthly_ranked
+WHERE total_units_sold < 2500
+ORDER BY sales_month, rank_per_month DESC
+
+-- Products declining month over month (revenue-based) -- 
+WITH monthly_prices AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, product_id, category, SUM((units_sold*price) - ((discount/100)*(units_sold*price))) AS monthly_price, SUM(units_sold) AS monthly_units_sold
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+),
+declining_monthly_ranked AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY sales_month
+        ORDER BY monthly_price DESC
+    ) AS monthly_rank
+    FROM monthly_prices
+)
+SELECT sales_month, product_id, category, monthly_price, monthly_units_sold
+FROM declining_monthly_ranked
+WHERE monthly_price < 150000
+ORDER BY sales_month, monthly_rank DESC
+
+-- Top 10 products per category -- 
+WITH product_category AS(
+    SELECT product_id, category, SUM(units_sold) AS total_units_sold
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2
+),
+ranked_products AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY category
+        ORDER BY total_units_sold DESC
+    ) AS product_rank
+    FROM product_category
+)
+SELECT product_id, category, total_units_sold, product_rank
+FROM ranked_products
+WHERE product_rank >= 1 AND product_rank <= 10
+
+-- Top product per category per month -- 
+WITH product_category AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, product_id, category, SUM(units_sold) AS total_units_sold
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+),
+ranked_products AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY sales_month, category
+        ORDER BY total_units_sold DESC
+    ) AS product_rank
+    FROM product_category
+)
+SELECT sales_month, product_id, category, total_units_sold
+FROM ranked_products
+WHERE product_rank = 1
+ORDER BY sales_month, total_units_sold DESC
