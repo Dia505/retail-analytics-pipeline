@@ -1,5 +1,137 @@
 SELECT * FROM cleaned_retail_inventory;
 
+-- Summary Stats --
+-- units_sold & units_ordered --
+-- Most products have moderate sales, but a few top-selling products significantly boost overall sales volume --
+SELECT MIN(units_sold) AS min_units_sold, 
+    MAX(units_sold) AS max_units_sold, 
+    AVG(units_sold) AS avg_units_sold, 
+    PERCENTILE_CONT(0.5) WITHIN GROUP(ORDER BY units_sold) AS median_units_sold,
+
+    MIN(units_ordered) AS min_units_ordered,
+    MAX(units_ordered) AS max_units_ordered,
+    AVG(units_ordered) AS avg_units_ordered,
+    PERCENTILE_CONT(0.5) WITHIN GROUP(ORDER BY units_ordered) AS median_units_ordered
+
+FROM cleaned_retail_inventory;
+
+-- price & discount --
+-- Prices and discounts are fairly consistent across products, with no extreme performers significantly skewing the distribution --
+SELECT
+    MIN(price)  AS min_price,
+    MAX(price)  AS max_price,
+    AVG(price)  AS avg_price,
+    PERCENTILE_CONT(0.5) 
+        WITHIN GROUP (ORDER BY price) AS median_price,
+
+    MIN(discount) AS min_discount,
+    MAX(discount) AS max_discount,
+    AVG(discount) AS avg_discount,
+    PERCENTILE_CONT(0.5) 
+        WITHIN GROUP (ORDER BY discount) AS median_discount
+
+FROM cleaned_retail_inventory;
+
+-- inventory --
+SELECT
+    MIN(inventory)  AS min_inventory,
+    MAX(inventory)  AS max_inventory,
+    AVG(inventory)  AS avg_inventory,
+    PERCENTILE_CONT(0.5) 
+        WITHIN GROUP (ORDER BY inventory) AS median_inventory
+FROM cleaned_retail_inventory;
+
+-- demand_forecast --
+SELECT
+    MIN(demand_forecast)  AS min_demand_forecast,
+    MAX(demand_forecast)  AS max_demand_forecast,
+    AVG(demand_forecast)  AS avg_demand_forecast,
+    PERCENTILE_CONT(0.5) 
+        WITHIN GROUP (ORDER BY demand_forecast) AS median_demand_forecast
+FROM cleaned_retail_inventory;
+
+-- competitor_pricing --
+SELECT
+    MIN(competitor_pricing) AS min_competitor_pricing,
+    MAX(competitor_pricing) AS max_competitor_pricing,
+    AVG(competitor_pricing) AS avg_competitor_pricing,
+    PERCENTILE_CONT(0.5)
+        WITHIN GROUP(ORDER BY competitor_pricing) AS median_competitor_pricing
+FROM cleaned_retail_inventory;
+
+-- sales_date --
+SELECT
+    MIN(sales_date) AS start_date,
+    MAX(sales_date) AS end_date
+FROM cleaned_retail_inventory;
+
+-- Data Distribution --
+-- units_sold & units_ordered --
+SELECT PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75])
+    WITHIN GROUP(ORDER BY units_sold) AS quartiles_units_sold,
+
+    PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75])
+    WITHIN GROUP(ORDER BY units_ordered) AS quartiles_units_ordered
+
+FROM cleaned_retail_inventory
+
+-- price & discount --
+SELECT PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75])
+    WITHIN GROUP(ORDER BY price) AS quartiles_price,
+
+    PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75])
+    WITHIN GROUP(ORDER BY discount) AS quartiles_discount
+
+FROM cleaned_retail_inventory
+
+-- inventory --
+SELECT PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75])
+    WITHIN GROUP(ORDER BY inventory) AS quartiles_inventory
+FROM cleaned_retail_inventory
+
+-- demand_forecast --
+SELECT PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75])
+    WITHIN GROUP(ORDER BY demand_forecast) AS quartiles_demand_forecast
+FROM cleaned_retail_inventory
+
+-- competitor_pricing --
+SELECT PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75])
+    WITHIN GROUP(ORDER BY competitor_pricing) AS quartiles_competitor_pricing
+FROM cleaned_retail_inventory
+
+-- Categorical Summary --
+-- category --
+SELECT category, COUNT(*) AS records
+FROM cleaned_retail_inventory
+GROUP BY category
+ORDER BY records DESC;
+
+-- region --
+SELECT region, COUNT(*) AS records
+FROM cleaned_retail_inventory
+GROUP BY region
+ORDER BY records DESC;
+
+-- weather_condition --
+SELECT weather_condition, COUNT(*) AS records
+FROM cleaned_retail_inventory
+GROUP BY weather_condition
+ORDER BY records DESC;
+
+-- holiday_promotion --
+SELECT holiday_promotion, COUNT(*) AS records
+FROM cleaned_retail_inventory
+GROUP BY holiday_promotion
+ORDER BY records DESC;
+
+-- seasonality --
+SELECT seasonality, COUNT(*) AS records
+FROM cleaned_retail_inventory
+GROUP BY seasonality
+ORDER BY records DESC;
+
+---------------------------------------------- EDA ---------------------------------------------
+-------------------------------- Sales and Product Performance ----------------------------
 -- Which products and categories sell the most --
 -- Highest selling product per day --
 WITH daily_product_sales AS(
@@ -146,3 +278,21 @@ SELECT sales_month, product_id, category, total_units_sold
 FROM ranked_products
 WHERE product_rank = 1
 ORDER BY sales_month, total_units_sold DESC
+
+------------------------------------ Inventory Health ---------------------------------------
+-- Items that are overstocked but have low sales --
+WITH monthly_inventory_sales_status AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category,
+    SUM(units_ordered) AS monthly_units_ordered,
+    SUM(units_sold) AS monthly_units_sold,
+    SUM(demand_forecast) AS monthly_demand_forecast
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+)
+SELECT sales_month, product_id, category, monthly_units_sold, monthly_units_ordered,
+(monthly_units_ordered - monthly_units_sold)/monthly_units_sold AS overstock_ratio,
+monthly_demand_forecast,
+CASE WHEN ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75 THEN 'Overstocked' ELSE 'Healthy' END AS stock_status
+FROM monthly_inventory_sales_status
+WHERE ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75
+ORDER BY sales_month, overstock_ratio DESC
