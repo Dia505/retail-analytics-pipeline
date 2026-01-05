@@ -296,3 +296,52 @@ CASE WHEN ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75
 FROM monthly_inventory_sales_status
 WHERE ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75
 ORDER BY sales_month, overstock_ratio DESC
+
+-- Inventory turnover rate (monthly)
+WITH start_date_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS inventory_month,
+    MIN(sales_date) AS start_date,
+    category
+    FROM cleaned_retail_inventory
+    GROUP BY 1,3
+),
+beginning_inventory_cte AS(
+    SELECT s.inventory_month, s.category, SUM(c.inventory) AS beginning_inventory
+    FROM start_date_cte AS s JOIN cleaned_retail_inventory AS c
+    ON TO_CHAR(DATE_TRUNC('month', c.sales_date), 'YYYY-MM') = s.inventory_month
+      AND c.category = s.category
+      AND c.sales_date = s.start_date
+    GROUP BY s.inventory_month, s.category
+),
+end_date_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS inventory_month,
+    MAX(sales_date) AS end_date,
+    category
+    FROM cleaned_retail_inventory
+    GROUP BY 1,3
+),
+ending_inventory_cte AS(
+    SELECT e.inventory_month, e.category, SUM(c.inventory) AS ending_inventory
+    FROM end_date_cte AS e JOIN cleaned_retail_inventory AS c
+    ON TO_CHAR(DATE_TRUNC('month', c.sales_date), 'YYYY-MM') = e.inventory_month
+      AND c.category = e.category
+      AND c.sales_date = e.end_date
+    GROUP BY e.inventory_month, e.category
+),
+monthly_units_sold_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS inventory_month, category, SUM(units_sold) AS total_monthly_units_sold
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2
+),
+inventory_cte AS(
+    SELECT b.inventory_month, b.category, b.beginning_inventory, e.ending_inventory, m.total_monthly_units_sold
+    FROM beginning_inventory_cte AS b JOIN ending_inventory_cte AS e
+    ON b.inventory_month = e.inventory_month AND b.category = e.category
+    JOIN monthly_units_sold_cte AS m
+    ON b.inventory_month = m.inventory_month AND b.category = m.category
+)
+SELECT *, ROUND((beginning_inventory+ending_inventory)/2.0, 2) AS average_inventory,
+ROUND((total_monthly_units_sold)/((beginning_inventory+ending_inventory)/2.0), 2) AS inventory_turnover_rate
+FROM inventory_cte
+ORDER BY inventory_month
+
