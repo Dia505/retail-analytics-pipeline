@@ -167,7 +167,7 @@ monthly_ranked AS(
 )
 SELECT sales_month, product_id, category, total_monthly_sales FROM monthly_ranked
 WHERE rank_per_month = 1
-ORDER BY sales_month
+ORDER BY sales_month;
 
 -- Highest selling category per month --
 WITH monthly_category_sales AS(
@@ -185,7 +185,7 @@ monthly_ranked_category AS(
 )
 SELECT sales_month, category, total_monthly_category_sales FROM monthly_ranked_category
 WHERE category_rank_per_month = 1
-ORDER BY sales_month
+ORDER BY sales_month;
 
 -- Highest selling product per year -- 
 WITH yearly_product_sales AS(
@@ -203,7 +203,7 @@ yearly_ranked AS(
 )
 SELECT sales_year, product_id, category, total_yearly_sales FROM yearly_ranked
 WHERE rank_per_year = 1
-ORDER BY sales_year
+ORDER BY sales_year;
 
 -- Products declining month over month -- 
 WITH monthly_sales AS(
@@ -221,7 +221,7 @@ declining_monthly_ranked AS(
 )
 SELECT sales_month, product_id, category, total_units_sold FROM declining_monthly_ranked
 WHERE total_units_sold < 2500
-ORDER BY sales_month, rank_per_month DESC
+ORDER BY sales_month, rank_per_month DESC;
 
 -- Products declining month over month (revenue-based) -- 
 WITH monthly_prices AS(
@@ -258,7 +258,7 @@ ranked_products AS(
 )
 SELECT product_id, category, total_units_sold, product_rank
 FROM ranked_products
-WHERE product_rank >= 1 AND product_rank <= 10
+WHERE product_rank >= 1 AND product_rank <= 10;
 
 -- Top product per category per month -- 
 WITH product_category AS(
@@ -277,7 +277,7 @@ ranked_products AS(
 SELECT sales_month, product_id, category, total_units_sold
 FROM ranked_products
 WHERE product_rank = 1
-ORDER BY sales_month, total_units_sold DESC
+ORDER BY sales_month, total_units_sold DESC;
 
 ------------------------------------ Inventory Health ---------------------------------------
 -- Items that are overstocked but have low sales --
@@ -295,7 +295,7 @@ monthly_demand_forecast,
 CASE WHEN ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75 THEN 'Overstocked' ELSE 'Healthy' END AS stock_status
 FROM monthly_inventory_sales_status
 WHERE ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75
-ORDER BY sales_month, overstock_ratio DESC
+ORDER BY sales_month, overstock_ratio DESC;
 
 -- Inventory turnover rate (monthly)
 WITH start_date_cte AS(
@@ -343,5 +343,59 @@ inventory_cte AS(
 SELECT *, ROUND((beginning_inventory+ending_inventory)/2.0, 2) AS average_inventory,
 ROUND((total_monthly_units_sold)/((beginning_inventory+ending_inventory)/2.0), 2) AS inventory_turnover_rate
 FROM inventory_cte
-ORDER BY inventory_month
+ORDER BY inventory_month;
 
+------------------------- Seasonal Trends ------------------------------
+-- How do sales vary through the months? --
+SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, seasonality, SUM(units_sold) as total_monthly_sale
+FROM cleaned_retail_inventory
+GROUP BY 1, seasonality
+ORDER BY 1,
+    CASE seasonality
+        WHEN 'Spring' THEN 2
+        WHEN 'Summer' THEN 3
+        WHEN 'Autumn' THEN 4
+        WHEN 'winter' THEN 5
+    END;
+
+-- How do sales vary by season through the years? --
+SELECT TO_CHAR(DATE_TRUNC('year', sales_date), 'YYYY') as sales_year, seasonality, SUM(units_sold) as total_yearly_sale
+FROM cleaned_retail_inventory
+GROUP BY 1, seasonality
+ORDER BY 1,
+    CASE seasonality
+        WHEN 'Spring' THEN 2
+        WHEN 'Summer' THEN 3
+        WHEN 'Autumn' THEN 4
+        WHEN 'winter' THEN 5
+    END;
+
+-- How do sales vary by season? --
+SELECT seasonality, SUM(units_sold) as total_monthly_sale
+FROM cleaned_retail_inventory
+GROUP BY seasonality
+ORDER BY
+    CASE seasonality
+        WHEN 'Spring' THEN 2
+        WHEN 'Summer' THEN 3
+        WHEN 'Autumn' THEN 4
+        WHEN 'winter' THEN 5
+    END;
+
+-- Which categories perform better in summer and winter? --
+WITH summer_category_performance AS(
+    SELECT TO_CHAR(DATE_TRUNC('year', sales_date), 'YYYY') as sales_year, category, SUM(units_sold) as summer_sale
+    FROM cleaned_retail_inventory
+    WHERE seasonality = 'Summer'
+    GROUP BY 1, 2
+),
+winter_category_performance AS(
+    SELECT TO_CHAR(DATE_TRUNC('year', sales_date), 'YYYY') as sales_year, category, SUM(units_sold) as winter_sale
+    FROM cleaned_retail_inventory
+    WHERE seasonality = 'Winter'
+    GROUP BY 1, 2
+)
+SELECT s.sales_year, s.category, s.summer_sale, w.winter_sale
+FROM summer_category_performance AS s JOIN winter_category_performance AS w
+ON s.sales_year = w.sales_year AND s.category = w.category
+ORDER BY s.sales_year
