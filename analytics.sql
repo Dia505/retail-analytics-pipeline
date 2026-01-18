@@ -398,4 +398,125 @@ winter_category_performance AS(
 SELECT s.sales_year, s.category, s.summer_sale, w.winter_sale
 FROM summer_category_performance AS s JOIN winter_category_performance AS w
 ON s.sales_year = w.sales_year AND s.category = w.category
-ORDER BY s.sales_year
+ORDER BY s.sales_year;
+
+-- Which products were the highest in demand month-wise --
+WITH monthly_demand_forecast_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS demand_month, category, SUM(demand_forecast) AS monthly_demand_forecast
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2
+),
+demand_forecast_rank_cte AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY demand_month
+        ORDER BY monthly_demand_forecast DESC
+    ) AS demand_rank
+    FROM monthly_demand_forecast_cte
+)
+SELECT demand_month, category, monthly_demand_forecast
+FROM demand_forecast_rank_cte
+WHERE demand_rank=1;
+
+-- Peak demand months for each category --
+WITH category_monthly_demand_forecast_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'MM') AS demand_month, category, SUM(demand_forecast) AS monthly_demand_forecast
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2
+),
+demand_forecast_rank_cte AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY category
+        ORDER BY monthly_demand_forecast DESC
+    ) AS demand_rank
+    FROM category_monthly_demand_forecast_cte
+)
+SELECT category, demand_month AS peak_demand_calendar_month, monthly_demand_forecast AS peak_demand_forecast
+FROM demand_forecast_rank_cte
+WHERE demand_rank = 1;
+
+-- Overstocked products in off season -- 
+WITH monthly_inventory_status_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS demand_month, product_id, category,
+    SUM(units_ordered) AS monthly_units_ordered,
+    SUM(units_sold) AS monthly_units_sold,
+    SUM(demand_forecast) AS monthly_demand_forecast
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+),
+demand_forecast_rank_cte AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY demand_month
+        ORDER BY monthly_demand_forecast DESC
+    ) AS demand_rank
+    FROM monthly_inventory_status_cte
+)
+SELECT demand_month, product_id, category, monthly_units_sold, monthly_units_ordered,
+(monthly_units_ordered - monthly_units_sold)/monthly_units_sold AS overstock_ratio,
+monthly_demand_forecast, demand_rank,
+CASE WHEN ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75 THEN 'Overstocked' ELSE 'Healthy' END AS stock_status
+FROM demand_forecast_rank_cte
+WHERE ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75
+ORDER BY demand_month, overstock_ratio DESC;
+
+-- Missed sales in high season --
+SELECT 
+    TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month,
+    product_id,
+    category,
+    GREATEST(
+        0,
+        ROUND(SUM(demand_forecast) - SUM(units_sold), 0)
+    ) AS missed_sales
+FROM cleaned_retail_inventory
+GROUP BY 1,2,3;
+
+-- Are discounted items actually selling better? --
+WITH monthly_discounted_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, product_id, category, ROUND(AVG(units_sold),2) as avg_units_sold, SUM((units_sold*price) - ((discount/100)*(units_sold*price))) AS total_revenue
+    FROM cleaned_retail_inventory
+    WHERE discount > 0
+    GROUP BY 1,2,3
+),
+monthly_non_discounted_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, product_id, category, ROUND(AVG(units_sold),2) as avg_units_sold, SUM(units_sold*price) AS total_revenue
+    FROM cleaned_retail_inventory
+    WHERE discount = 0
+    GROUP BY 1,2,3
+)
+SELECT d.sales_month, d.product_id, d.category, (d.avg_units_sold - n.avg_units_sold) AS diff_avg_units_sold, (d.total_revenue - n.total_revenue) AS diff_total_revenue,
+CASE 
+    WHEN (d.avg_units_sold - n.avg_units_sold) > 0 AND (d.total_revenue - n.total_revenue) > 0 THEN 'Effective Discount'
+    WHEN (d.avg_units_sold - n.avg_units_sold) > 0 AND (d.total_revenue - n.total_revenue) < 0 THEN 'Volume at a Cost'
+    WHEN (d.avg_units_sold - n.avg_units_sold) < 0 AND (d.total_revenue - n.total_revenue) > 0 THEN 'Ineffective Discount'
+    WHEN (d.avg_units_sold - n.avg_units_sold) < 0 AND (d.total_revenue - n.total_revenue) < 0 THEN 'Counterproductive Discount'
+END AS discount_performance
+FROM monthly_discounted_cte AS d INNER JOIN monthly_non_discounted_cte AS n
+ON d.sales_month = n.sales_month AND d.product_id = n.product_id AND d.category = n.category
+ORDER BY d.sales_month, product_id;
+
+-- Discount that gives highest revenue for each product (month-wise) --
+WITH discount_revenue_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, product_id, category, discount, SUM((units_sold*price) - ((discount/100)*(units_sold*price))) AS revenue
+    FROM cleaned_retail_inventory
+    WHERE discount > 0
+    GROUP BY 1,2,3,4
+),
+revenue_rank_cte AS(
+    SELECT *,
+    RANK() OVER(
+        PARTITION BY sales_month, product_id, category
+        ORDER BY revenue DESC
+    ) AS revenue_rank
+    FROM discount_revenue_cte
+)
+SELECT sales_month, product_id, category, discount, revenue
+FROM revenue_rank_cte
+WHERE revenue_rank = 1;
+
+-- Price positioning against competitors --
+SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category, ROUND(AVG(price), 2) AS avg_price, ROUND(AVG(competitor_pricing), 2) AS avg_competitor_price, ROUND(AVG(price - competitor_pricing), 2) AS avg_price_gap
+FROM cleaned_retail_inventory
+GROUP BY 1,2,3
