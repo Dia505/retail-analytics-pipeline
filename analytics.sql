@@ -517,6 +517,104 @@ FROM revenue_rank_cte
 WHERE revenue_rank = 1;
 
 -- Price positioning against competitors --
-SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category, ROUND(AVG(price), 2) AS avg_price, ROUND(AVG(competitor_pricing), 2) AS avg_competitor_price, ROUND(AVG(price - competitor_pricing), 2) AS avg_price_gap
+SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category, 
+ROUND(AVG(price), 2) AS avg_price, ROUND(AVG(competitor_pricing), 2) AS avg_competitor_price, 
+ROUND(AVG(price - competitor_pricing), 2) AS avg_price_gap
+FROM cleaned_retail_inventory
+GROUP BY 1,2,3;
+
+-- Correlation between demand forecast and competitor pricing --
+SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category,
+CORR(units_sold, competitor_pricing) AS correlation
 FROM cleaned_retail_inventory
 GROUP BY 1,2,3
+HAVING CORR(units_sold, competitor_pricing) > 0.5 OR CORR(units_sold, competitor_pricing) < -0.5
+ORDER BY 1,2;
+
+-- Trend of units sold on the basis of competitor pricing fluctuation --
+WITH competitor_pricing_distribution_cte AS(
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category,
+    MIN(competitor_pricing) AS min_competitor_pricing,
+    ROUND(PERCENTILE_CONT(0.25)
+        WITHIN GROUP(ORDER BY competitor_pricing)) AS q1_competitor_pricing,
+    ROUND(PERCENTILE_CONT(0.5)
+        WITHIN GROUP(ORDER BY competitor_pricing)) AS q2_competitor_pricing,
+    ROUND(PERCENTILE_CONT(0.75)
+        WITHIN GROUP(ORDER BY competitor_pricing)) AS q3_competitor_pricing,
+    MAX(competitor_pricing) AS max_competitor_pricing
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+)
+SELECT d.sales_month, c.product_id, c.category, c.units_sold,
+CASE
+    WHEN c.competitor_pricing BETWEEN d.min_competitor_pricing AND d.q1_competitor_pricing THEN 'Low'
+    WHEN c.competitor_pricing BETWEEN d.q1_competitor_pricing AND d.q2_competitor_pricing THEN 'Lower-Mid'
+    WHEN c.competitor_pricing BETWEEN d.q2_competitor_pricing AND d.q3_competitor_pricing THEN 'Upper-Mid'
+    WHEN c.competitor_pricing BETWEEN d.q3_competitor_pricing AND d.max_competitor_pricing THEN 'High'
+END AS competitor_price_status
+FROM competitor_pricing_distribution_cte AS d INNER JOIN cleaned_retail_inventory AS c
+ON d.sales_month = TO_CHAR(DATE_TRUNC('month', c.sales_date), 'YYYY-MM') AND d.product_id = c.product_id AND d.category = c.category
+ORDER BY d.sales_month, c.product_id, c.category;
+
+-- Revenue impact due to competitor pricing --
+WITH price_difference_cte AS(
+    SELECT 
+        TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month,
+        product_id, 
+        category, 
+        ROUND(AVG(price - competitor_pricing), 2) AS avg_price_difference
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+),
+price_difference_distribution_cte AS (
+    SELECT
+        MIN(avg_price_difference) AS min_avg_price_difference,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY avg_price_difference) AS q1_avg_price_difference,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY avg_price_difference) AS median_avg_price_difference,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY avg_price_difference) AS q3_avg_price_difference,
+        MAX(avg_price_difference) AS max_avg_price_difference
+    FROM price_difference_cte
+)
+SELECT
+    c.sales_date, c.product_id, c.category, c.price, c.competitor_pricing,
+    CASE
+        WHEN (c.price-c.competitor_pricing) BETWEEN d.min_avg_price_difference AND d.q1_avg_price_difference THEN 'Below competitor'
+        WHEN (c.price-c.competitor_pricing) BETWEEN d.q1_avg_price_difference AND d.median_avg_price_difference THEN 'Slightly below competitor'
+        WHEN (c.price-c.competitor_pricing) BETWEEN d.median_avg_price_difference AND d.q3_avg_price_difference THEN 'Slightly above competitor'
+        WHEN (c.price-c.competitor_pricing) BETWEEN d.q3_avg_price_difference AND d.max_avg_price_difference THEN 'Above competitor'
+    END AS price_difference_status
+FROM cleaned_retail_inventory c
+CROSS JOIN price_difference_distribution_cte d
+ORDER BY c.product_id, c.category, c.sales_date;
+
+-- Discount applied revenue impact due to competitor pricing --
+WITH discounted_price_difference_cte AS(
+    SELECT 
+        TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month,
+        product_id, 
+        category, 
+        ROUND(AVG((price * (1 - discount/100)) - competitor_pricing), 2) AS avg_discounted_price_difference
+    FROM cleaned_retail_inventory
+    WHERE discount > 0
+    GROUP BY 1,2,3
+),
+discounted_price_difference_distribution_cte AS (
+    SELECT
+        MIN(avg_discounted_price_difference) AS min_avg_discounted_price_difference,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY avg_discounted_price_difference) AS q1_avg_discounted_price_difference,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY avg_discounted_price_difference) AS median_avg_discounted_price_difference,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY avg_discounted_price_difference) AS q3_avg_discounted_price_difference,
+        MAX(avg_discounted_price_difference) AS max_avg_discounted_price_difference
+    FROM discounted_price_difference_cte
+)
+SELECT
+    c.sales_date, c.product_id, c.category, c.price, c.discount, c.competitor_pricing,
+    CASE
+        WHEN ((c.price * (1 - c.discount/100)) - c.competitor_pricing) BETWEEN d.min_avg_discounted_price_difference AND d.q1_avg_discounted_price_difference THEN 'Below competitor'
+        WHEN ((c.price * (1 - c.discount/100)) - c.competitor_pricing) BETWEEN d.q1_avg_discounted_price_difference AND d.median_avg_discounted_price_difference THEN 'Slightly below competitor'
+        WHEN ((c.price * (1 - c.discount/100)) - c.competitor_pricing) BETWEEN d.median_avg_discounted_price_difference AND d.q3_avg_discounted_price_difference THEN 'Slightly above competitor'
+        WHEN ((c.price * (1 - c.discount/100)) - c.competitor_pricing) BETWEEN d.q3_avg_discounted_price_difference AND d.max_avg_discounted_price_difference THEN 'Above competitor'
+    END AS price_difference_status
+FROM cleaned_retail_inventory c
+CROSS JOIN discounted_price_difference_distribution_cte d
+ORDER BY c.product_id, c.category, c.sales_date;
