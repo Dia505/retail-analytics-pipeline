@@ -169,7 +169,7 @@ SELECT sales_month, product_id, category, total_monthly_sales FROM monthly_ranke
 WHERE rank_per_month = 1
 ORDER BY sales_month;
 
--- Highest selling category per month --
+-- Top sold category per month --
 WITH monthly_category_sales AS(
     SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, category, SUM(units_sold) AS total_monthly_category_sales
     FROM cleaned_retail_inventory
@@ -224,23 +224,32 @@ WHERE total_units_sold < 2500
 ORDER BY sales_month, rank_per_month DESC;
 
 -- Products declining month over month (revenue-based) -- 
-WITH monthly_prices AS(
-    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, product_id, category, SUM((units_sold*price) - ((discount/100)*(units_sold*price))) AS monthly_price, SUM(units_sold) AS monthly_units_sold
+WITH monthly_revenue AS (
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category,
+        ROUND(SUM(
+            (units_sold * price)
+            - ((discount / 100.0) * (units_sold * price))
+        ), 2) AS monthly_revenue
     FROM cleaned_retail_inventory
     GROUP BY 1,2,3
 ),
-declining_monthly_ranked AS(
-    SELECT *,
-    RANK() OVER(
-        PARTITION BY sales_month
-        ORDER BY monthly_price DESC
-    ) AS monthly_rank
-    FROM monthly_prices
+revenue_with_lag AS (
+    SELECT
+        *,
+        LAG(monthly_revenue) OVER (
+            PARTITION BY product_id
+            ORDER BY sales_month
+        ) AS prev_month_revenue
+    FROM monthly_revenue
 )
-SELECT sales_month, product_id, category, monthly_price, monthly_units_sold
-FROM declining_monthly_ranked
-WHERE monthly_price < 150000
-ORDER BY sales_month, monthly_rank DESC
+SELECT sales_month, product_id, category, monthly_revenue, prev_month_revenue,
+    ROUND(
+        ((monthly_revenue - prev_month_revenue) / prev_month_revenue) * 100,
+        2
+    ) AS mom_change_pct
+FROM revenue_with_lag
+WHERE prev_month_revenue IS NOT NULL AND monthly_revenue < prev_month_revenue
+ORDER BY sales_month, mom_change_pct;
 
 -- Top 10 products per category -- 
 WITH product_category AS(
@@ -279,6 +288,79 @@ FROM ranked_products
 WHERE product_rank = 1
 ORDER BY sales_month, total_units_sold DESC;
 
+-- Sales trend by month --
+SELECT 
+    TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month,
+    SUM(units_sold) AS total_monthly_sale
+FROM cleaned_retail_inventory
+GROUP BY 1
+ORDER BY 1;
+
+-- Top product by revenue for each month --
+WITH monthly_product_sales AS (
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month,
+        product_id,
+        category,
+        SUM(price*units_sold) AS total_revenue
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+),
+ranked_products AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY sales_month
+               ORDER BY total_revenue DESC
+           ) AS rank
+    FROM monthly_product_sales
+)
+SELECT sales_month,  product_id, category, total_revenue
+FROM ranked_products
+WHERE rank = 1
+ORDER BY sales_month;
+
+-- Top 10 products by revenue for each month --
+WITH monthly_product_sales AS (
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month,
+        product_id,
+        category,
+        SUM(price*units_sold) AS total_revenue
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2,3
+),
+ranked_products AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY sales_month
+               ORDER BY total_revenue DESC
+           ) AS rank
+    FROM monthly_product_sales
+)
+SELECT sales_month,  product_id, category, total_revenue
+FROM ranked_products
+WHERE rank >= 1 AND rank <= 10
+ORDER BY sales_month;
+
+-- Highest selling category for each month --
+WITH monthly_category_sales AS (
+    SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month,
+        category,
+        SUM(price*units_sold) AS total_revenue
+    FROM cleaned_retail_inventory
+    GROUP BY 1,2
+),
+ranked_categories AS (
+    SELECT *,
+           ROW_NUMBER() OVER (
+               PARTITION BY sales_month
+               ORDER BY total_revenue DESC
+           ) AS rank
+    FROM monthly_category_sales
+)
+SELECT sales_month,  category, total_revenue
+FROM ranked_categories
+WHERE rank = 1
+ORDER BY sales_month;
+
 ------------------------------------ Inventory Health ---------------------------------------
 -- Items that are overstocked but have low sales --
 WITH monthly_inventory_sales_status AS(
@@ -297,7 +379,7 @@ FROM monthly_inventory_sales_status
 WHERE ((monthly_units_ordered - monthly_units_sold)/monthly_units_sold)>0.75
 ORDER BY sales_month, overstock_ratio DESC;
 
--- Inventory turnover rate (monthly)
+-- Inventory turnover rate (monthly) --
 WITH start_date_cte AS(
     SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS inventory_month,
     MIN(sales_date) AS start_date,
@@ -346,7 +428,7 @@ FROM inventory_cte
 ORDER BY inventory_month;
 
 ------------------------- Seasonal Trends ------------------------------
--- How do sales vary through the months? --
+-- How do sales vary by seasons through the months? --
 SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') as sales_month, seasonality, SUM(units_sold) as total_monthly_sale
 FROM cleaned_retail_inventory
 GROUP BY 1, seasonality
@@ -379,7 +461,7 @@ ORDER BY
         WHEN 'Spring' THEN 2
         WHEN 'Summer' THEN 3
         WHEN 'Autumn' THEN 4
-        WHEN 'winter' THEN 5
+        WHEN 'Winter' THEN 5
     END;
 
 -- Which categories perform better in summer and winter? --
@@ -512,10 +594,10 @@ revenue_rank_cte AS(
     ) AS revenue_rank
     FROM discount_revenue_cte
 )
-SELECT sales_month, product_id, category, discount, revenue
-FROM revenue_rank_cte
-WHERE revenue_rank = 1;
+SELECT sales_month, product_id, category, discount, revenue, revenue_rank
+FROM revenue_rank_cte;
 
+-------------------------- Competition Analysis -------------------------------
 -- Price positioning against competitors --
 SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, product_id, category, 
 ROUND(AVG(price), 2) AS avg_price, ROUND(AVG(competitor_pricing), 2) AS avg_competitor_price, 
