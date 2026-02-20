@@ -170,6 +170,7 @@ WHERE rank_per_month = 1
 ORDER BY sales_month;
 
 -- Top sold category per month --
+CREATE OR REPLACE VIEW highest_selling_category_per_month AS
 WITH monthly_category_sales AS(
     SELECT TO_CHAR(DATE_TRUNC('month', sales_date), 'YYYY-MM') AS sales_month, category, SUM(units_sold) AS total_monthly_category_sales
     FROM cleaned_retail_inventory
