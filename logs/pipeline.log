@@ -86,3 +86,19 @@
 2026-02-20 13:36:34,268 - INFO - Starting automated eda pipeline......
 2026-02-20 13:36:35,148 - INFO - Query converted to excel sheet
 2026-02-20 13:36:35,261 - INFO - Automated EDA complete
+2026-02-21 21:03:14,878 - INFO - Starting data load pipeline......
+2026-02-21 21:03:18,326 - INFO - Database connection established
+2026-02-21 21:04:21,458 - INFO - CSV loaded to database successfully
+2026-02-21 21:04:21,726 - INFO - View created
+2026-02-21 21:04:21,839 - INFO - Data loading complete
+2026-02-21 21:04:21,841 - INFO - Starting automated eda pipeline......
+2026-02-21 21:04:23,202 - INFO - Query converted to excel sheet
+2026-02-21 21:04:23,334 - INFO - Automated EDA complete
+2026-02-21 21:19:55,803 - INFO - Starting data load pipeline......
+2026-02-21 21:19:56,618 - INFO - Database connection established
+2026-02-21 21:20:51,878 - INFO - CSV loaded to database successfully
+2026-02-21 21:20:52,130 - INFO - View created
+2026-02-21 21:20:52,228 - INFO - Data loading complete
+2026-02-21 21:20:52,228 - INFO - Starting automated eda pipeline......
+2026-02-21 21:20:53,354 - INFO - Query converted to excel sheet
+2026-02-21 21:20:53,463 - INFO - Automated EDA complete
